@@ -1,3 +1,8 @@
+import time
+start_time = time.time()  # Record start time
+# Your code here
+
+
 import numpy as np
 from scipy.integrate import solve_ivp
 from scipy.sparse import diags, kron, identity, csr_matrix
@@ -544,6 +549,9 @@ for j in range(3):
 axs5[-1].legend(fontsize=7, ncol=2, loc='center left', bbox_to_anchor=(1.02, 0.5))
 plt.tight_layout()
 
+
+end_time = time.time()    # Record end time
+print("Execution time:", end_time - start_time, "seconds")
 # fig.savefig('/mnt/user-data/outputs/M5_pressure_temperature.png', dpi=150)
 # fig2.savefig('/mnt/user-data/outputs/M5_concentrations.png', dpi=150)
 # fig3.savefig('/mnt/user-data/outputs/M5_centerline_vs_wall.png', dpi=150)
@@ -553,3 +561,4 @@ plt.tight_layout()
 # blocking GUI window on machines with a display. Uncomment only if running
 # interactively with a display available.
 plt.show()
+

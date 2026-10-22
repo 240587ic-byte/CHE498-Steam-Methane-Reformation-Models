@@ -1,3 +1,5 @@
+import time
+start_time = time.time()
 import numpy as np
 from scipy.integrate import solve_ivp
 from scipy.sparse import diags, kron, identity, csr_matrix
@@ -440,9 +442,10 @@ ax2.set_ylabel('Concentration (kmol/m3)')
 ax2.set_title('Species concentration vs reactor length')
 ax2.legend(ncol=3, fontsize=9)
 plt.tight_layout()
-
-fig.savefig('/mnt/user-data/outputs/M2_pressure_temperature_composition.png', dpi=150)
-fig2.savefig('/mnt/user-data/outputs/M2_concentrations.png', dpi=150)
+end_time = time.time()    # Record end time
+print("Execution time:", end_time - start_time, "seconds")
+#fig.savefig('/mnt/user-data/outputs/M2_pressure_temperature_composition.png', dpi=150)
+#fig2.savefig('/mnt/user-data/outputs/M2_concentrations.png', dpi=150)
 # NOTE: plt.show() is intentionally NOT called by default - it opens a
 # blocking GUI window on machines with a display. Uncomment only if running
 # interactively with a display available.

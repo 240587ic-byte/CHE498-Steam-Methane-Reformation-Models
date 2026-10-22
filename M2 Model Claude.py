@@ -1,3 +1,5 @@
+import time
+start_time = time.time()
 """
 ================================================================================
  Steam Methane Reforming (SMR) Reactor - Model M2
@@ -95,7 +97,8 @@ ETA = 1.0        # try 1, 0.1, 0.01, 0.001 as in the paper (Fig. 3-4, Table 3)
 Ak  = {1: 4.225e15/3600.0, 2: 1.955e6/3600.0, 3: 1.020e15/3600.0}   # kmol/(kgcat.s) [/3600: h->s]
 E_a = {1: 240.1, 2: 67.13, 3: 243.9}                                 # kJ/mol
 AK  = {1: 4.707e12, 2: 1.142e-2, 3: 5.375e10}
-dH298 = {1: 206.1, 2: -41.15, 3: 164.9}                              # kJ/mol   Eq.(A.6) exponent
+dH298 = {1: 206.1, 2: -41.15, 3: 164.9}                              # kJ/mol   Eq.(A.6) exponent (Kj fit, kept at 298K per Table A.1's own correlation)
+dH948 = {1: 224.0, 2: -37.3, 3: 187.5}                                # kJ/mol   Eq.(A.7) reference value, Table A.1 (used below)
 AKi = {'CO':8.23e-5, 'H2':6.12e-9, 'CH4':6.65e-4, 'H2O':1.77e5}      # bar^-1 (H2O dimensionless)
 dHi = {'CO':-70.65, 'H2':-82.90, 'CH4':-38.28, 'H2O':88.68}          # kJ/mol   Eq.(A.8) exponent
 
@@ -239,8 +242,13 @@ def wall_htc(T, Uz, mu_g, lam_g, rho_g, Cp_g):
     return 0.4*(lam_g/dp)*(2.58*Re**(1.0/3.0)*Pr**(1.0/3.0) + 0.094*Re**0.8*Pr**0.4)
 
 def dHrxn_T(T, j):
-    """Heat of reaction at T via Cp integration, Eq.(A.7) -> kJ/mol"""
-    Tl = 298.15
+    """Heat of reaction at T via Cp integration, Eq.(A.7) -> kJ/mol.
+       Reference temperature = 948 K (Table A.1 gives ΔHrxn,j(948K) directly),
+       instead of 298.15 K, since the reactor operates in the ~790-990 K
+       range: integrating the Cp polynomial from 948 K keeps the excursion
+       small (~<250 K instead of ~<700 K), reducing extrapolation error from
+       the Table C.5 polynomial fits."""
+    Tl = 948.0
     integral = np.zeros_like(T)
     for s in species:
         nu = NU[s][j-1]
@@ -250,13 +258,13 @@ def dHrxn_T(T, j):
         val = (A*(T - Tl) + B/2*(T**2 - Tl**2) + C/3*(T**3 - Tl**3) +
                D/4*(T**4 - Tl**4) + E/5*(T**5 - Tl**5))
         integral += nu*val
-    return dH298[j] + integral/1000.0     # J/mol -> kJ/mol
+    return dH948[j] + integral/1000.0     # J/mol -> kJ/mol
 
 def kinetics(T, Pp):
     """Xu & Froment LHHW kinetics, Eq.(A.1)-(A.8), Table A.1.
        Pp: dict of partial pressures [bar]. Returns R1,R2,R3 [kmol/(kgcat.s)]."""
     k = {j: Ak[j]*np.exp(-E_a[j]/(Rg_kJ*T)) for j in (1, 2, 3)}
-    K = {j: AK[j]*np.exp(-dH298[j]/(Rg_kJ*T)) for j in (1, 2, 3)}
+    K = {j: AK[j]*np.exp(-dH948[j]/(Rg_kJ*T)) for j in (1, 2, 3)}
     Ki = {s: AKi[s]*np.exp(-dHi[s]/(Rg_kJ*T)) for s in ('CO', 'H2', 'CH4', 'H2O')}
     H2 = np.maximum(Pp['H2'], 1e-8)
     DEN = 1.0 + Ki['CO']*Pp['CO'] + Ki['H2']*H2 + Ki['CH4']*Pp['CH4'] + Ki['H2O']*Pp['H2O']/H2
@@ -407,9 +415,17 @@ y0 = np.concatenate([np.tile(C0, (n, 1)).T.ravel(), np.full(n, T0), np.full(n, P
 tri = diags([1.0, 1.0, 1.0], offsets=[-1, 0, 1], shape=(n, n), format='csr')
 jac_sparsity = kron(csr_matrix(np.ones((8, 8))), tri, format='csr')
 
-t_final = 300.0    # s, several residence times -> steady state (Sec. 3 of paper)
+def steady_state_event(t, y):
+    """Fires (and stops the integration) once the system has stopped moving."""
+    return np.max(np.abs(rhs(t, y))) - 1e-4     # crosses zero when max|dy/dt| < 1e-4
+steady_state_event.terminal = True
+steady_state_event.direction = -1
+
+t_final = 300.0    # s, upper bound only -- integration normally stops earlier via the event
 sol = solve_ivp(rhs, [0.0, t_final], y0, method='BDF',
-                 rtol=1e-6, atol=1e-9, jac_sparsity=jac_sparsity)
+                 rtol=1e-6, atol=1e-9, jac_sparsity=jac_sparsity,
+                 events=steady_state_event)
+print(f"Reached steady state at t = {sol.t[-1]:.2f} s (of {t_final} s allotted)")
 
 C_ss, T_ss, P_profile_bar = unpack(sol.y[:, -1])
 
@@ -443,9 +459,10 @@ plt.tight_layout()
 
 X_CH4 = 1.0 - (C_ss[0]*Uz_ss)/(C0[0]*Uz0)     # Eq.(88)-style CH4 conversion
 print(f"CH4 conversion at outlet: {X_CH4[-1]:.4f}  (eta = {ETA})")
-
-# fig.savefig('/mnt/user-data/outputs/M2_pressure_temperature.png', dpi=150)
-# fig2.savefig('/mnt/user-data/outputs/M2_concentrations.png', dpi=150)
+end_time = time.time()    # Record end time
+print("Execution time:", end_time - start_time, "seconds")
+#fig.savefig('/mnt/user-data/outputs/M2_pressure_temperature.png', dpi=150)
+#fig2.savefig('/mnt/user-data/outputs/M2_concentrations.png', dpi=150)
 # NOTE: plt.show() is intentionally NOT called here. It opens a blocking GUI
 # window and waits for you to close it before the script can exit - on a
 # headless machine (no display) or some IDEs this hangs indefinitely, which
